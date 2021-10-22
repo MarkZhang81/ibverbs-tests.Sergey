@@ -416,26 +416,25 @@ struct mkey_layout_new_list : public mkey_layout_new {
 	}
 };
 
-template<size_t ...Sizes>
-struct mkey_layout_new_list_mrs : public mkey_layout_new_list {
+struct _mkey_layout_new_list_mrs : public mkey_layout_new_list {
 	ibvt_env &env;
 	ibvt_pd &pd;
 	std::vector<struct ibvt_mr> mrs;
 	bool initialized;
 
-	mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
+	_mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
 		env(env), pd(pd), initialized(false) {}
 
-	virtual ~mkey_layout_new_list_mrs() = default;
+	virtual ~_mkey_layout_new_list_mrs() = default;
 
-	virtual void init() override {
+	virtual void init(std::vector<size_t> &sizes) {
 		if (initialized)
 			return;
 
 		initialized = true;
 		std::vector<struct ibv_sge> sgl;
 
-		for (auto &s: { Sizes... }) {
+		for (auto &s: sizes) {
 			mrs.emplace_back(env, pd, s);
 			auto &mr = mrs.back();
 			mr.init();
@@ -454,29 +453,38 @@ struct mkey_layout_new_list_mrs : public mkey_layout_new_list {
 	}
 };
 
-template <typename T, T V, size_t Index>
-struct deindex_v {
-	static constexpr T value = V;
+template<size_t ...Sizes>
+struct mkey_layout_new_list_mrs : public _mkey_layout_new_list_mrs {
+
+	mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
+		_mkey_layout_new_list_mrs(env, pd) {}
+
+	virtual ~mkey_layout_new_list_mrs() = default;
+
+	virtual void init() override {
+		std::vector<size_t> sizes = { Sizes... };
+
+		_mkey_layout_new_list_mrs::init(sizes);
+	}
 };
 
-template <typename T,
-	  T V,
-	  size_t N,
-	  template<T...> typename TT,
-	  typename Indices = std::make_index_sequence<N> >
-struct repeat_v;
+template<size_t Size, size_t Count>
+struct mkey_layout_new_list_fixed_mrs : public _mkey_layout_new_list_mrs {
 
-template <typename T,
-	  T V,
-	  size_t N,
-	  template<T...> typename TT,
-	  size_t... Indices>
-struct repeat_v<T, V, N, TT, std::index_sequence<Indices...>> {
-	using type = TT<deindex_v<T, V, Indices>::value...>;
+	mkey_layout_new_list_fixed_mrs(ibvt_env &env, ibvt_pd &pd) :
+		_mkey_layout_new_list_mrs(env, pd) {}
+
+	virtual ~mkey_layout_new_list_fixed_mrs() = default;
+
+	virtual void init() override {
+		std::vector<size_t> sizes;
+
+		for (size_t i = 0; i < Count; ++i)
+			sizes.push_back(Size);
+
+		_mkey_layout_new_list_mrs::init(sizes);
+	}
 };
-
-template <size_t Size, size_t Count>
-using mkey_layout_new_list_fixed_mrs = typename repeat_v<size_t, Size, Count, mkey_layout_new_list_mrs>::type;
 
 struct mkey_layout_new_interleaved : public mkey_layout_new {
 	uint16_t repeat_count;
