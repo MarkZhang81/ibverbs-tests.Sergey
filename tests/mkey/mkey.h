@@ -31,18 +31,93 @@
 #define MKEY_H
 
 #include <algorithm>
+#include <stdint.h>
+#include <endian.h>
 
+#define INITL(x) do { \
+		if (!this->env.skip) { \
+			VERBS_TRACE("%3d.%p: initialize\t%s" #x "\n", __LINE__, this, this->env.lvl_str); \
+			this->env.lvl_str[this->env.lvl++] = ' '; \
+			EXPECT_NO_FATAL_FAILURE(x); \
+			this->env.lvl_str[--this->env.lvl] = 0; \
+			if (this->env.skip) { \
+				VERBS_TRACE("%3d.%p: failed\t%s" #x " - skipping test\n", __LINE__, this, this->env.lvl_str); \
+				return; \
+			} \
+		} \
+	} while(0)
+
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+
+struct dif {
+	uint16_t guard;
+	uint16_t app_tag;
+	uint32_t ref_tag;
+};
+
+typedef union {
+	uint64_t sig; // sig is in Big Endian (Network) mode
+	struct dif dif;
+} dif_to_sig;
+
+template <uint16_t Guard, uint16_t AppTag, uint32_t RefTag,
+	  bool RefRemap = true>
+struct t10dif_sig {
+	static const uint16_t guard = Guard;
+	static const uint16_t app_tag = AppTag;
+	static const uint32_t ref_tag = RefTag;
+
+	static void sig_to_buf(uint8_t *buf, uint32_t block_index) {
+		dif_to_sig dif;
+
+		dif.dif.guard = htons(guard);
+		dif.dif.app_tag = htons(app_tag);
+
+		if (RefRemap) {
+			dif.dif.ref_tag = htonl(ref_tag + block_index);
+		} else {
+			dif.dif.ref_tag = htonl(ref_tag);
+		}
+
+		*(uint64_t *)buf = dif.sig;
+	}
+};
+
+struct sig_none {
+	static void sig_to_buf(uint8_t *buf, uint32_t block_index) {}
+};
+
+template <uint32_t Sig> struct crc32_sig {
+	static const uint32_t sig = Sig;
+
+	static void sig_to_buf(uint8_t *buf, uint32_t block_index) {
+		*(uint32_t *)buf = htonl(sig);
+	}
+};
+
+template <uint64_t Sig> struct crc64_sig {
+	static const uint64_t sig = Sig;
+
+	static void sig_to_buf(uint8_t *buf, uint32_t block_index) {
+		*(uint64_t *)buf = htobe64(sig);
+	}
+};
+#endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
+
+template<uint32_t MaxSendWr = 128, uint32_t MaxSendSge = 16,
+	 uint32_t MaxRecvWr = 32, uint32_t MaxRecvSge = 4,
+	 uint32_t MaxInlineData = 512, bool Pipelining = false>
 struct ibvt_qp_dv : public ibvt_qp_rc {
 	ibvt_qp_dv(ibvt_env &e, ibvt_pd &p, ibvt_cq &c) :
 		ibvt_qp_rc(e, p, c) {}
 
 	virtual void init_attr(struct ibv_qp_init_attr_ex &attr) override {
 		ibvt_qp_rc::init_attr(attr);
-		attr.cap.max_send_wr = 128;
-		attr.cap.max_send_sge = 16;
-		attr.cap.max_recv_wr = 32;
-		attr.cap.max_recv_sge = 4;
-		attr.cap.max_inline_data = 512;
+		attr.cap.max_send_wr = MaxSendWr;
+		attr.cap.max_send_sge = MaxSendSge;
+		attr.cap.max_recv_wr = MaxRecvWr;
+		attr.cap.max_recv_sge = MaxRecvSge;
+		attr.cap.max_inline_data = MaxInlineData;
 		attr.comp_mask |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
 		attr.send_ops_flags = IBV_QP_EX_WITH_RDMA_WRITE |
 				      IBV_QP_EX_WITH_SEND |
@@ -52,7 +127,16 @@ struct ibvt_qp_dv : public ibvt_qp_rc {
 
 	virtual void init_dv_attr(struct mlx5dv_qp_init_attr &dv_attr) {
 		dv_attr.comp_mask = MLX5DV_QP_INIT_ATTR_MASK_SEND_OPS_FLAGS;
-		dv_attr.send_ops_flags = MLX5DV_QP_EX_WITH_MKEY_CONFIGURE;
+		dv_attr.send_ops_flags = MLX5DV_QP_EX_WITH_MR_INTERLEAVED |
+					 MLX5DV_QP_EX_WITH_MR_LIST;
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+		dv_attr.send_ops_flags |= MLX5DV_QP_EX_WITH_MKEY_CONFIGURE;
+		if (Pipelining) {
+			dv_attr.comp_mask |=
+			    MLX5DV_QP_INIT_ATTR_MASK_QP_CREATE_FLAGS;
+			dv_attr.create_flags = MLX5DV_QP_CREATE_SIG_PIPELINING;
+		}
+#endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 	}
 
 	virtual void init() override {
@@ -103,6 +187,26 @@ struct ibvt_qp_dv : public ibvt_qp_rc {
 		ibv_wr_set_sge_list(qpx, 1, &local_sge);
 	}
 
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+	virtual void cancel_posted_wrs(uint64_t wr_id, int wr_num) {
+		struct mlx5dv_qp_ex *dv_qp;
+		struct ibv_qp_ex *qpx = ibv_qp_to_qp_ex(qp);
+
+		dv_qp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
+		int ret = mlx5dv_qp_cancel_posted_send_wrs(dv_qp, wr_id);
+		ASSERT_EQ(wr_num, ret);
+	}
+#endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
+
+	virtual void modify_qp_to_rts() {
+		struct ibv_qp_attr attr;
+
+		memset(&attr, 0, sizeof(attr));
+
+		attr.qp_state = IBV_QPS_RTS;
+		attr.cur_qp_state = IBV_QPS_SQD;
+		DO(ibv_modify_qp(qp, &attr, IBV_QP_STATE | IBV_QP_CUR_STATE));
+	}
 };
 
 struct mkey : public ibvt_abstract_mr {
@@ -147,6 +251,9 @@ struct mkey : public ibvt_abstract_mr {
 	}
 
 	virtual void check() = 0;
+	virtual void check(int err_type) = 0;
+	virtual void check(int err_type, uint64_t actual, uint64_t expected,
+			   uint64_t offset) = 0;
 };
 
 struct mkey_dv : public mkey {
@@ -184,13 +291,43 @@ struct mkey_dv : public mkey {
 		return mlx5_mkey->lkey;
 	}
 
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
 	virtual void check() override {
 		struct mlx5dv_mkey_err err;
 		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
 		ASSERT_EQ(MLX5DV_MKEY_NO_ERR, err.err_type);
 	}
+
+	virtual void check(int err_type) override {
+		struct mlx5dv_mkey_err err;
+		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
+		ASSERT_EQ(err_type, err.err_type);
+	}
+
+	virtual void check(int err_type, uint64_t actual, uint64_t expected,
+			   uint64_t offset) override {
+		struct mlx5dv_mkey_err err;
+		struct mlx5dv_sig_err &sig_err = err.err.sig;
+		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
+		ASSERT_EQ(err_type, err.err_type);
+		ASSERT_EQ(actual, sig_err.actual_value);
+		ASSERT_EQ(expected, sig_err.expected_value);
+		ASSERT_EQ(offset, sig_err.offset);
+	}
+#else
+	virtual void check() override {
+	}
+
+	virtual void check(int err_type) override {
+	}
+
+	virtual void check(int err_type, uint64_t actual, uint64_t expected,
+			   uint64_t offset) override {
+	}
+#endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 };
 
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
 struct mkey_setter {
 	virtual ~mkey_setter() = default;
 	virtual void init() {};
@@ -201,20 +338,18 @@ struct mkey_setter {
 template<uint32_t AccessFlags = IBV_ACCESS_LOCAL_WRITE |
 	 IBV_ACCESS_REMOTE_READ |
 	 IBV_ACCESS_REMOTE_WRITE>
-struct mkey_basic_attr : public mkey_setter {
+struct mkey_access_flags : public mkey_setter {
 	uint32_t access_flags;
 	/* @todo: add comp_mask attr */
 
-	mkey_basic_attr(ibvt_env &env, ibvt_pd &pd, uint32_t access_flags = AccessFlags) :
+	mkey_access_flags(ibvt_env &env, ibvt_pd &pd, uint32_t access_flags = AccessFlags) :
 		access_flags(access_flags) {}
 
 	virtual void wr_set(struct ibvt_qp &qp) {
 		struct ibv_qp_ex *qpx = ibv_qp_to_qp_ex(qp.qp);
 		struct mlx5dv_qp_ex *mqp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
-		struct mlx5dv_mkey_attr mkey_attr = {
-			.access_flags = access_flags
-		};
-		mlx5dv_wr_mkey_set_basic_attr(mqp, &mkey_attr);
+
+		mlx5dv_wr_set_mkey_access_flags(mqp, access_flags);
 	}
 };
 
@@ -256,7 +391,7 @@ struct mkey_layout_new_list : public mkey_layout_new {
 		struct ibv_qp_ex *qpx = ibv_qp_to_qp_ex(qp.qp);
 		struct mlx5dv_qp_ex *mqp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
 
-		mlx5dv_wr_mkey_set_layout_list(mqp, sgl.size(), sgl.data());
+		mlx5dv_wr_set_mkey_layout_list(mqp, sgl.size(), sgl.data());
 	}
 
 	/* @todo: will not work on top of other mkey where addr is zero. */
@@ -281,24 +416,22 @@ struct mkey_layout_new_list : public mkey_layout_new {
 	}
 };
 
-template<size_t ...Sizes>
-struct mkey_layout_new_list_mrs : public mkey_layout_new_list {
+struct _mkey_layout_new_list_mrs : public mkey_layout_new_list {
 	ibvt_env &env;
 	ibvt_pd &pd;
 	std::vector<struct ibvt_mr> mrs;
 	bool initialized;
 
-	mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
+	_mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
 		env(env), pd(pd), initialized(false) {}
 
-	virtual ~mkey_layout_new_list_mrs() = default;
+	virtual ~_mkey_layout_new_list_mrs() = default;
 
-	virtual void init() override {
+	virtual void init(std::vector<size_t> &sizes) {
 		if (initialized)
 			return;
 
 		initialized = true;
-		constexpr std::initializer_list<size_t> sizes = { Sizes... };
 		std::vector<struct ibv_sge> sgl;
 
 		for (auto &s: sizes) {
@@ -317,6 +450,39 @@ struct mkey_layout_new_list_mrs : public mkey_layout_new_list {
 			mr.dump(offset, std::min(length, mr.size), pfx);
 			length -= mr.size;
 		}
+	}
+};
+
+template<size_t ...Sizes>
+struct mkey_layout_new_list_mrs : public _mkey_layout_new_list_mrs {
+
+	mkey_layout_new_list_mrs(ibvt_env &env, ibvt_pd &pd) :
+		_mkey_layout_new_list_mrs(env, pd) {}
+
+	virtual ~mkey_layout_new_list_mrs() = default;
+
+	virtual void init() override {
+		std::vector<size_t> sizes = { Sizes... };
+
+		_mkey_layout_new_list_mrs::init(sizes);
+	}
+};
+
+template<size_t Size, size_t Count>
+struct mkey_layout_new_list_fixed_mrs : public _mkey_layout_new_list_mrs {
+
+	mkey_layout_new_list_fixed_mrs(ibvt_env &env, ibvt_pd &pd) :
+		_mkey_layout_new_list_mrs(env, pd) {}
+
+	virtual ~mkey_layout_new_list_fixed_mrs() = default;
+
+	virtual void init() override {
+		std::vector<size_t> sizes;
+
+		for (size_t i = 0; i < Count; ++i)
+			sizes.push_back(Size);
+
+		_mkey_layout_new_list_mrs::init(sizes);
 	}
 };
 
@@ -357,7 +523,7 @@ struct mkey_layout_new_interleaved : public mkey_layout_new {
 		struct ibv_qp_ex *qpx = ibv_qp_to_qp_ex(qp.qp);
 		struct mlx5dv_qp_ex *mqp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
 
-		mlx5dv_wr_mkey_set_layout_interleaved(mqp,
+		mlx5dv_wr_set_mkey_layout_interleaved(mqp,
 						      repeat_count,
 						      interleaved.size(),
 						      interleaved.data());
@@ -410,10 +576,10 @@ struct mkey_layout_new_interleaved_mrs : public mkey_layout_new_interleaved {
 			return;
 
 		initialized = true;
-		constexpr std::initializer_list<uint32_t> tmp_interleaved = { Interleaved... };
+		std::initializer_list<uint32_t> tmp_interleaved = { Interleaved... };
 		std::vector<struct mlx5dv_mr_interleaved> mlx5_interleaved;
 
-		static_assert(tmp_interleaved.size() % 2 == 0, "Number of interleaved is not multiple of 2");
+		static_assert(sizeof...(Interleaved) % 2 == 0, "Number of interleaved is not multiple of 2");
 		for (auto i = tmp_interleaved.begin(); i != tmp_interleaved.end(); ++i) {
 			auto byte_count = *i;
 			auto skip_count = *(++i);
@@ -435,21 +601,58 @@ struct mkey_layout_new_interleaved_mrs : public mkey_layout_new_interleaved {
 	}
 };
 
-struct mkey_sig {
-	virtual void set_sig(struct mlx5dv_sig_block_domain &domain) = 0;
+template<enum mlx5dv_sig_t10dif_bg_type BgType, enum mlx5dv_sig_t10dif_bg_caps BgTypeCaps>
+struct mkey_sig_t10dif_type {
+	static const enum mlx5dv_sig_t10dif_bg_type mlx5_t10dif_type = BgType;
+	static const enum mlx5dv_sig_t10dif_bg_caps mlx5_t10dif_caps = BgTypeCaps;
 };
 
-struct mkey_sig_none : public mkey_sig {
-	static constexpr uint32_t sig_size = 0;
+typedef mkey_sig_t10dif_type<MLX5DV_SIG_T10DIF_CRC, MLX5DV_SIG_T10DIF_BG_CAP_CRC> mkey_sig_t10dif_crc;
+typedef mkey_sig_t10dif_type<MLX5DV_SIG_T10DIF_CSUM, MLX5DV_SIG_T10DIF_BG_CAP_CSUM> mkey_sig_t10dif_csum;
 
-	virtual void set_sig(struct mlx5dv_sig_block_domain &domain) override {
-		domain.sig_type = MLX5DV_SIG_TYPE_NONE;
+template<typename BgType, uint16_t Bg, uint16_t AppTag, uint32_t RefTag>
+struct mkey_sig_t10dif_type1 {
+	static constexpr uint32_t sig_size = 8;
+	struct mlx5dv_sig_t10dif dif;
+
+	void set_sig(struct mlx5dv_sig_block_domain &domain) {
+		domain.sig_type = MLX5DV_SIG_TYPE_T10DIF;
+		dif.bg_type = BgType::mlx5_t10dif_type;
+		dif.bg = Bg;
+		dif.app_tag = AppTag;
+		dif.ref_tag = RefTag;
+		dif.flags = MLX5DV_SIG_T10DIF_FLAG_REF_REMAP |
+			    MLX5DV_SIG_T10DIF_FLAG_APP_ESCAPE;
+		domain.sig.dif = &dif;
+		domain.comp_mask = 0;
 	}
 
-	static void sig_to_buf(uint64_t value, uint8_t *buf) {}
+	static bool is_supported(struct mlx5dv_context &attr) {
+		return attr.sig_caps.t10dif_bg & BgType::mlx5_t10dif_caps &&
+		       attr.sig_caps.block_prot & MLX5DV_SIG_PROT_CAP_T10DIF;
+	}
+};
+
+template<typename BgType, uint16_t Bg, uint16_t AppTag, uint32_t RefTag>
+struct mkey_sig_t10dif_type3 {
+	static constexpr uint32_t sig_size = 8;
+	struct mlx5dv_sig_t10dif dif;
+
+	void set_sig(struct mlx5dv_sig_block_domain &domain) {
+		domain.sig_type = MLX5DV_SIG_TYPE_T10DIF;
+		dif.bg_type = BgType::mlx5_t10dif_type;
+		dif.bg = Bg;
+		dif.app_tag = AppTag;
+		dif.ref_tag = RefTag;
+		dif.flags = MLX5DV_SIG_T10DIF_FLAG_APP_ESCAPE |
+			    MLX5DV_SIG_T10DIF_FLAG_APP_REF_ESCAPE;
+		domain.sig.dif = &dif;
+		domain.comp_mask = 0;
+	}
 
 	static bool is_supported(struct mlx5dv_context &attr) {
-		return true;
+		return attr.sig_caps.t10dif_bg & BgType::mlx5_t10dif_caps &&
+		       attr.sig_caps.block_prot & MLX5DV_SIG_PROT_CAP_T10DIF;
 	}
 };
 
@@ -461,69 +664,60 @@ struct mkey_sig_crc_type {
 
 typedef mkey_sig_crc_type<MLX5DV_SIG_CRC_TYPE_CRC32, MLX5DV_SIG_CRC_TYPE_CAP_CRC32> mkey_sig_crc_type_crc32;
 typedef mkey_sig_crc_type<MLX5DV_SIG_CRC_TYPE_CRC32C, MLX5DV_SIG_CRC_TYPE_CAP_CRC32C> mkey_sig_crc_type_crc32c;
-typedef mkey_sig_crc_type<MLX5DV_SIG_CRC_TYPE_CRC64, MLX5DV_SIG_CRC_TYPE_CAP_CRC64> mkey_sig_crc_type_crc64;
+typedef mkey_sig_crc_type<MLX5DV_SIG_CRC_TYPE_CRC64_XP10, MLX5DV_SIG_CRC_TYPE_CAP_CRC64_XP10> mkey_sig_crc_type_crc64xp10;
 
 template<typename CrcType, uint32_t Seed>
-struct mkey_sig_crc32 : public mkey_sig {
+struct mkey_sig_crc32 {
 	static constexpr uint32_t sig_size = 4;
 	struct mlx5dv_sig_crc crc;
 
-	virtual void set_sig(struct mlx5dv_sig_block_domain &domain) override {
+	void set_sig(struct mlx5dv_sig_block_domain &domain) {
 		domain.sig_type = MLX5DV_SIG_TYPE_CRC;
 		crc.type = CrcType::mlx5_crc_type;
-		crc.seed.crc32 = Seed;
+		crc.seed = Seed;
 		domain.sig.crc = &crc;
-	}
-
-	static void sig_to_buf(uint64_t value, uint8_t *buf) {
-		uint32_t value32 = htonl(value & 0xFFFFFFFF);
-		memcpy(buf, &value32, sig_size);
+		domain.comp_mask = 0;
 	}
 
 	static bool is_supported(struct mlx5dv_context &attr) {
-		return attr.sig_caps.crc_type & CrcType::mlx5_crc_type_caps;
+		return attr.sig_caps.crc_type & CrcType::mlx5_crc_type_caps &&
+		       attr.sig_caps.block_prot & MLX5DV_SIG_PROT_CAP_CRC;
 	}
 };
 
 template<typename CrcType, uint64_t Seed>
-struct mkey_sig_crc64 : public mkey_sig {
+struct mkey_sig_crc64 {
 	static constexpr uint32_t sig_size = 8;
 	struct mlx5dv_sig_crc crc;
 
-	virtual void set_sig(struct mlx5dv_sig_block_domain &domain) override {
+	void set_sig(struct mlx5dv_sig_block_domain &domain) {
 		domain.sig_type = MLX5DV_SIG_TYPE_CRC;
 		crc.type = CrcType::mlx5_crc_type;
-		crc.seed.crc64 = Seed;
+		crc.seed = Seed;
 		domain.sig.crc = &crc;
-	}
-
-	static void sig_to_buf(uint64_t value, uint8_t *buf) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-		value = ((uint64_t)htonl((value) & 0xFFFFFFFFLL) << 32) | htonl((value) >> 32);
-#endif
-		memcpy(buf, &value, sig_size);
+		domain.comp_mask = 0;
 	}
 
 	static bool is_supported(struct mlx5dv_context &attr) {
-		return attr.sig_caps.crc_type & CrcType::mlx5_crc_type_caps;
+		return attr.sig_caps.crc_type & CrcType::mlx5_crc_type_caps &&
+		       attr.sig_caps.block_prot & MLX5DV_SIG_PROT_CAP_CRC;
 	}
 };
 
-template<enum mlx5dv_sig_block_size Mlx5BlockSize,
-	 enum mlx5dv_sig_block_size_caps Mlx5BlockSizeCaps,
+template<enum mlx5dv_block_size Mlx5BlockSize,
+	 enum mlx5dv_block_size_caps Mlx5BlockSizeCaps,
 	 uint32_t BlockSize>
-struct mkey_sig_block_size {
-	static const enum mlx5dv_sig_block_size mlx5_block_size = Mlx5BlockSize;
-	static const enum mlx5dv_sig_block_size_caps mlx5_block_size_caps = Mlx5BlockSizeCaps;
+struct mkey_block_size {
+	static const enum mlx5dv_block_size mlx5_block_size = Mlx5BlockSize;
+	static const enum mlx5dv_block_size_caps mlx5_block_size_caps = Mlx5BlockSizeCaps;
 	static const uint32_t block_size = BlockSize;
 };
 
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_512, MLX5DV_SIG_BLOCK_SIZE_CAP_512, 512> mkey_sig_block_size_512;
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_520, MLX5DV_SIG_BLOCK_SIZE_CAP_520, 520> mkey_sig_block_size_520;
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_4048, MLX5DV_SIG_BLOCK_SIZE_CAP_4048, 4048> mkey_sig_block_size_4048;
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_4096, MLX5DV_SIG_BLOCK_SIZE_CAP_4096, 4096> mkey_sig_block_size_4096;
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_4160, MLX5DV_SIG_BLOCK_SIZE_CAP_4160, 4160> mkey_sig_block_size_4160;
-typedef mkey_sig_block_size<MLX5DV_SIG_BLOCK_SIZE_1M, MLX5DV_SIG_BLOCK_SIZE_CAP_1M, 1024*1024> mkey_sig_block_size_1M;
+typedef mkey_block_size<MLX5DV_BLOCK_SIZE_512, MLX5DV_BLOCK_SIZE_CAP_512, 512> mkey_block_size_512;
+typedef mkey_block_size<MLX5DV_BLOCK_SIZE_520, MLX5DV_BLOCK_SIZE_CAP_520, 520> mkey_block_size_520;
+typedef mkey_block_size<MLX5DV_BLOCK_SIZE_4048, MLX5DV_BLOCK_SIZE_CAP_4048, 4048> mkey_block_size_4048;
+typedef mkey_block_size<MLX5DV_BLOCK_SIZE_4096, MLX5DV_BLOCK_SIZE_CAP_4096, 4096> mkey_block_size_4096;
+typedef mkey_block_size<MLX5DV_BLOCK_SIZE_4160, MLX5DV_BLOCK_SIZE_CAP_4160, 4160> mkey_block_size_4160;
 
 template<typename Sig, typename BlockSize>
 struct mkey_sig_block_domain {
@@ -545,9 +739,30 @@ struct mkey_sig_block_domain {
 	}
 };
 
-template<typename MkeyDomain, typename WireDomain, uint8_t CheckMask = 0xFF>
+struct mkey_sig_block_domain_none {
+	typedef mkey_block_size_512 BlockSizeType;
+	typedef struct mkey_sig_none {
+		static constexpr uint32_t sig_size = 0;
+	} SigType;
+
+	void set_domain(const mlx5dv_sig_block_domain **d) {
+		*d = NULL;
+	}
+
+	static bool is_supported(struct mlx5dv_context &attr) {
+		return true;
+	}
+};
+
+#define MLX5DV_SIG_CHECK_T10DIF_APPTAG_BYTE1 0x20
+#define MLX5DV_SIG_CHECK_T10DIF_APPTAG_BYTE0 0x10
+
+template<typename MemDomain, typename WireDomain,
+	 uint8_t CheckMask = 0xFF,
+	 uint16_t Flags = 0,
+	 uint8_t CopyMask = 0xFF>
 struct mkey_sig_block : public mkey_setter {
-	typedef MkeyDomain MkeyDomainType;
+	typedef MemDomain MemDomainType;
 	typedef WireDomain WireDomainType;
 
 	mkey_sig_block(ibvt_env &env, ibvt_pd &pd) {}
@@ -557,17 +772,19 @@ struct mkey_sig_block : public mkey_setter {
 		struct mlx5dv_qp_ex *mqp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
 		struct mlx5dv_sig_block_attr attr = {};
 
-		MkeyDomain mkey;
+		MemDomain mem;
 		WireDomain wire;
-		mkey.set_domain(&attr.mkey);
+		mem.set_domain(&attr.mem);
 		wire.set_domain(&attr.wire);
+		attr.flags = Flags;
 		attr.check_mask = CheckMask;
-		mlx5dv_wr_mkey_set_sig_block(mqp, &attr);
+		attr.copy_mask = CopyMask;
+		mlx5dv_wr_set_mkey_sig_block(mqp, &attr);
 	}
 
 	virtual size_t adjust_length(size_t length) {
-		size_t mkey_num_blocks = length / (MkeyDomainType::BlockSizeType::block_size + MkeyDomainType::SigType::sig_size);
-		size_t data_length = length - mkey_num_blocks * MkeyDomainType::SigType::sig_size;
+		size_t mem_num_blocks = length / (MemDomainType::BlockSizeType::block_size + MemDomainType::SigType::sig_size);
+		size_t data_length = length - mem_num_blocks * MemDomainType::SigType::sig_size;
 		size_t wire_num_blocks = data_length / WireDomainType::BlockSizeType::block_size;
 		size_t wire_length = data_length + wire_num_blocks * WireDomainType::SigType::sig_size;
 		return wire_length;
@@ -575,16 +792,21 @@ struct mkey_sig_block : public mkey_setter {
 
 	static bool is_supported(struct mlx5dv_context &attr) {
 		return attr.comp_mask & MLX5DV_CONTEXT_MASK_SIGNATURE_OFFLOAD &&
-			MkeyDomainType::is_supported(attr) &&
+			MemDomainType::is_supported(attr) &&
 			WireDomainType::is_supported(attr);
 	}
 };
 
 // Some helper types
-typedef mkey_sig_crc32<mkey_sig_crc_type_crc32, 0xFFFFFFFF> mkey_sig_crc32ieee;
-typedef mkey_sig_crc32<mkey_sig_crc_type_crc32c, 0xFFFFFFFF> mkey_sig_crc32c;
-typedef mkey_sig_crc64<mkey_sig_crc_type_crc64, 0xFFFFFFFFFFFFFFFF> mkey_sig_crc64xp10;
-typedef mkey_sig_block_domain<mkey_sig_none, mkey_sig_block_size_512> mkey_sig_block_domain_none;
+typedef mkey_sig_crc32<mkey_sig_crc_type_crc32, 0> mkey_sig_crc32ieee;
+typedef mkey_sig_crc32<mkey_sig_crc_type_crc32c, 0> mkey_sig_crc32c;
+typedef mkey_sig_crc64<mkey_sig_crc_type_crc64xp10, 0> mkey_sig_crc64xp10;
+typedef mkey_sig_t10dif_type1<mkey_sig_t10dif_crc, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_crc_type1_default;
+typedef mkey_sig_t10dif_type3<mkey_sig_t10dif_crc, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_crc_type3_default;
+
+typedef mkey_sig_t10dif_type1<mkey_sig_t10dif_csum, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_csum_type1_default;
+typedef mkey_sig_t10dif_type3<mkey_sig_t10dif_csum, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_csum_type3_default;
+
 typedef mkey_sig_block<mkey_sig_block_domain_none, mkey_sig_block_domain_none> mkey_sig_block_none;
 
 template<typename ...Setters>
@@ -640,8 +862,9 @@ struct mkey_dv_new : public mkey_dv {
 	virtual void wr_configure(ibvt_qp &qp) override {
 		struct ibv_qp_ex *qpx = ibv_qp_to_qp_ex(qp.qp);
 		struct mlx5dv_qp_ex *mqp = mlx5dv_qp_ex_from_ibv_qp_ex(qpx);
+		struct mlx5dv_mkey_conf_attr attr = {};
 
-		EXECL(mlx5dv_wr_mkey_configure(mqp, mlx5_mkey, 0));
+		EXECL(mlx5dv_wr_mkey_configure(mqp, mlx5_mkey, setters.size(), &attr));
 		for (auto s : setters) {
 			EXECL(s->wr_set(qp));
 		}
@@ -659,6 +882,7 @@ struct mkey_dv_new : public mkey_dv {
 		if (layout) layout->dump(offset, length, pfx);
 	}
 };
+#endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 
 template<typename QP>
 struct mkey_test_side : public ibvt_obj {
@@ -679,154 +903,126 @@ struct mkey_test_side : public ibvt_obj {
 	virtual void connect(struct mkey_test_side &remote) {
 		qp.connect(&remote.qp);
 	}
+
+	void trigger_poll() {
+		struct ibv_cq_ex *cq_ex = cq.cq2();
+		struct ibv_poll_cq_attr attr = {};
+
+		ASSERT_EQ(ENOENT, ibv_start_poll(cq_ex, &attr));
+	}
 };
 
-template<typename QP>
 struct rdma_op {
-	virtual void wr_submit(mkey_test_side<QP> &src_side,
-			       ibv_sge src_sge,
-			       mkey_test_side<QP> &dst_side,
-			       ibv_sge dst_sge) = 0;
-
-	virtual void submit(mkey_test_side<QP> &src_side,
-			    ibv_sge src_sge,
-			    mkey_test_side<QP> &dst_side,
-			    ibv_sge dst_sge) = 0;
-
-	virtual void complete(mkey_test_side<QP> &src_side,
-			      mkey_test_side<QP> &dst_side,
-			      enum ibv_wc_status src_status = IBV_WC_SUCCESS,
-			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) = 0;
-
+	template<typename QP>
 	void check_completion(mkey_test_side<QP> &side, enum ibv_wc_status status = IBV_WC_SUCCESS) {
 		ibvt_wc wc(side.cq);
 		side.cq.do_poll(wc);
 		ASSERT_EQ(status, wc().status);
 	}
+
+	template<typename QP>
+	void check_completion(mkey_test_side<QP> &side,
+				     enum ibv_wc_opcode opcode,
+				     enum ibv_wc_status status = IBV_WC_SUCCESS) {
+		ibvt_wc wc(side.cq);
+		side.cq.do_poll(wc);
+		ASSERT_EQ(status, wc().status);
+		ASSERT_EQ(opcode, wc().opcode);
+	}
 };
 
-template<typename QP>
-struct rdma_op_write : public rdma_op<QP> {
-	virtual void wr_submit(mkey_test_side<QP> &src_side,
+struct rdma_op_write : rdma_op {
+	template<typename QP>
+	void wr_submit(mkey_test_side<QP> &src_side,
 			       ibv_sge src_sge,
 			       mkey_test_side<QP> &dst_side,
-			       ibv_sge dst_sge) override {
+			       ibv_sge dst_sge) {
 		src_side.qp.wr_flags(IBV_SEND_SIGNALED);
 		src_side.qp.wr_rdma_write(src_sge, dst_sge);
 	}
 
-	virtual void submit(mkey_test_side<QP> &src_side,
+	template<typename QP>
+	void submit(mkey_test_side<QP> &src_side,
 			    ibv_sge src_sge,
 			    mkey_test_side<QP> &dst_side,
-			    ibv_sge dst_sge) override {
+			    ibv_sge dst_sge) {
 		src_side.qp.wr_start();
 		wr_submit(src_side, src_sge, dst_side, dst_sge);
 		src_side.qp.wr_complete();
 	}
 
-	virtual void complete(mkey_test_side<QP> &src_side,
+	template<typename QP>
+	void complete(mkey_test_side<QP> &src_side,
 			      mkey_test_side<QP> &dst_side,
 			      enum ibv_wc_status src_status = IBV_WC_SUCCESS,
-			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) override {
+			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) {
 		this->check_completion(src_side, src_status);
+		dst_side.trigger_poll();
 	}
 };
 
-template<typename QP>
-struct rdma_op_read : public rdma_op<QP> {
-	virtual void wr_submit(mkey_test_side<QP> &src_side,
+struct rdma_op_read : rdma_op {
+	template<typename QP>
+	void wr_submit(mkey_test_side<QP> &src_side,
 			       ibv_sge src_sge,
 			       mkey_test_side<QP> &dst_side,
-			       ibv_sge dst_sge) override {
+			       ibv_sge dst_sge) {
 		dst_side.qp.wr_flags(IBV_SEND_SIGNALED);
 		dst_side.qp.wr_rdma_read(dst_sge, src_sge);
 	}
 
-	virtual void submit(mkey_test_side<QP> &src_side,
+	template<typename QP>
+	void submit(mkey_test_side<QP> &src_side,
 			    ibv_sge src_sge,
 			    mkey_test_side<QP> &dst_side,
-			    ibv_sge dst_sge) override {
+			    ibv_sge dst_sge) {
 		dst_side.qp.wr_start();
 		wr_submit(src_side, src_sge, dst_side, dst_sge);
 		dst_side.qp.wr_complete();
 	}
 
-	virtual void complete(mkey_test_side<QP> &src_side,
+	template<typename QP>
+	void complete(mkey_test_side<QP> &src_side,
 			      mkey_test_side<QP> &dst_side,
 			      enum ibv_wc_status src_status = IBV_WC_SUCCESS,
-			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) override {
+			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) {
 		this->check_completion(dst_side, dst_status);
+		src_side.trigger_poll();
 	}
 };
 
-template<typename QP>
-struct rdma_op_send : public rdma_op<QP> {
-	virtual void wr_submit(mkey_test_side<QP> &src_side,
+struct rdma_op_send : rdma_op {
+	template<typename QP>
+	void wr_submit(mkey_test_side<QP> &src_side,
 			       ibv_sge src_sge,
 			       mkey_test_side<QP> &dst_side,
-			       ibv_sge dst_sge) override {
+			       ibv_sge dst_sge) {
 		// @todo: chaining for recv part is not implemented
 		dst_side.qp.recv(dst_sge);
 		src_side.qp.wr_flags(IBV_SEND_SIGNALED);
 		src_side.qp.wr_send(src_sge);
 	}
-	virtual void submit(mkey_test_side<QP> &src_side,
+
+	template<typename QP>
+	void submit(mkey_test_side<QP> &src_side,
 			    ibv_sge src_sge,
 			    mkey_test_side<QP> &dst_side,
-			    ibv_sge dst_sge) override {
+			    ibv_sge dst_sge) {
 		dst_side.qp.recv(dst_sge);
 		src_side.qp.wr_start();
 		wr_submit(src_side, src_sge, dst_side, dst_sge);
 		src_side.qp.wr_complete();
 	}
 
-	virtual void complete(mkey_test_side<QP> &src_side,
+	template<typename QP>
+	void complete(mkey_test_side<QP> &src_side,
 			      mkey_test_side<QP> &dst_side,
 			      enum ibv_wc_status src_status = IBV_WC_SUCCESS,
-			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) override {
+			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) {
 		this->check_completion(src_side, src_status);
 		this->check_completion(dst_side, dst_status);
 	}
 
-};
-
-template<typename QP>
-struct rdma_op_all : public rdma_op<QP> {
-	virtual void wr_submit(mkey_test_side<QP> &src_side,
-			       ibv_sge src_sge,
-			       mkey_test_side<QP> &dst_side,
-			       ibv_sge dst_sge) override {
-		struct rdma_op_read<QP> read;
-		struct rdma_op_write<QP> write;
-		struct rdma_op_send<QP> send;
-		read.wr_submit(src_side, src_sge, dst_side, dst_sge);
-		write.wr_submit(src_side, src_sge, dst_side, dst_sge);
-		send.wr_submit(src_side, src_sge, dst_side, dst_sge);
-	}
-
-	virtual void submit(mkey_test_side<QP> &src_side,
-			    ibv_sge src_sge,
-			    mkey_test_side<QP> &dst_side,
-			    ibv_sge dst_sge) override {
-		struct rdma_op_read<QP> read;
-		struct rdma_op_write<QP> write;
-		struct rdma_op_send<QP> send;
-		read.submit(src_side, src_sge, dst_side, dst_sge);
-		write.submit(src_side, src_sge, dst_side, dst_sge);
-		send.submit(src_side, src_sge, dst_side, dst_sge);
-	}
-
-	virtual void complete(mkey_test_side<QP> &src_side,
-			      mkey_test_side<QP> &dst_side,
-			      enum ibv_wc_status src_status = IBV_WC_SUCCESS,
-			      enum ibv_wc_status dst_status = IBV_WC_SUCCESS) override {
-		struct rdma_op_read<QP> read;
-		struct rdma_op_write<QP> write;
-		struct rdma_op_send<QP> send;
-		read.complete(src_side, dst_side, src_status, dst_status);
-		write.complete(src_side, dst_side, src_status, dst_status);
-		send.complete(src_side, dst_side, src_status, dst_status);
-	}
 };
 
 template<typename Qp>
@@ -842,8 +1038,6 @@ struct mkey_test_base : public testing::Test, public ibvt_env {
 
 	virtual void SetUp() override {
 		INIT(ctx.init());
-		if (skip)
-			return;
 		INIT(src_side.init());
 		INIT(dst_side.init());
 		INIT(src_side.connect(dst_side));
