@@ -31,6 +31,8 @@
 #define MKEY_H
 
 #include <algorithm>
+#include <string>
+#include <ostream>
 #include <stdint.h>
 #include <endian.h>
 
@@ -256,6 +258,106 @@ struct mkey : public ibvt_abstract_mr {
 			   uint64_t offset) = 0;
 };
 
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+struct mkey_sig_err {
+	enum mlx5dv_mkey_err_type err_type;
+	bool is_err_info_valid;
+	struct mlx5dv_sig_err err_info;
+
+	mkey_sig_err(enum mlx5dv_mkey_err_type e) :
+		err_type(e),
+		is_err_info_valid(false) {}
+
+	mkey_sig_err(int e) :
+		err_type((enum mlx5dv_mkey_err_type)e),
+		is_err_info_valid(false) { }
+
+	mkey_sig_err(const struct mlx5dv_mkey_err *dv_err) {
+		err_type = dv_err->err_type;
+		if (err_type == MLX5DV_MKEY_NO_ERR) {
+			is_err_info_valid = false;
+		} else {
+			is_err_info_valid = true;
+			err_info.actual_value = dv_err->err.sig.actual_value;
+			err_info.expected_value = dv_err->err.sig.expected_value;
+			err_info.offset = dv_err->err.sig.offset;
+		}
+	}
+
+	mkey_sig_err(int et, uint64_t actual, uint64_t expected,
+		     uint64_t offset) {
+		err_type = (enum mlx5dv_mkey_err_type)et;
+		is_err_info_valid = true;
+		err_info.actual_value = actual;
+		err_info.expected_value = expected;
+		err_info.offset = offset;
+	}
+
+	const char *type_c_str() const {
+		switch(err_type) {
+		case MLX5DV_MKEY_NO_ERR:
+			return "MLX5DV_MKEY_NO_ERR";
+		case MLX5DV_MKEY_SIG_BLOCK_BAD_GUARD:
+			return "MLX5DV_MKEY_SIG_BLOCK_BAD_GUARD";
+		case MLX5DV_MKEY_SIG_BLOCK_BAD_REFTAG:
+			return "MLX5DV_MKEY_SIG_BLOCK_BAD_REFTAG";
+		case MLX5DV_MKEY_SIG_BLOCK_BAD_APPTAG:
+			return "MLX5DV_MKEY_SIG_BLOCK_BAD_APPTAG";
+		}
+		return "UNKNOWN_ERROR";
+	}
+
+	std::string type_str() const {
+		return std::string(type_c_str());
+	}
+
+	uint64_t actual() const {
+		return err_info.actual_value;
+	}
+
+	uint64_t expected() const {
+		return err_info.expected_value;
+	}
+
+	uint64_t offset() const {
+		return err_info.offset;
+	}
+
+	friend bool operator==(const mkey_sig_err &l, const mkey_sig_err &r) {
+		if (l.err_type != r.err_type)
+			return false;
+
+		if (l.is_err_info_valid && r.is_err_info_valid) {
+			if (l.actual() != r.actual())
+				return false;
+
+			if (l.expected() != r.expected())
+				return false;
+
+			if (l.offset() != r.offset())
+				return false;
+		}
+
+		return true;
+	}
+
+	friend std::ostream& operator<<(std::ostream& os, const mkey_sig_err &sig_err) {
+		std::ios_base::fmtflags tmp;
+
+		if (!sig_err.is_err_info_valid)
+			return os << sig_err.type_str();
+
+		tmp = os.flags();
+		os << sig_err.type_str() << " actual: 0x" << std::hex << sig_err.actual() <<
+			", expected: 0x" << sig_err.expected() << ", offset: " << std::dec <<
+			sig_err.offset();
+		os.flags(tmp);
+
+		return os;
+	}
+};
+#endif
+
 struct mkey_dv : public mkey {
 	const uint16_t max_entries;
 	const uint32_t create_flags;
@@ -292,27 +394,23 @@ struct mkey_dv : public mkey {
 	}
 
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
-	virtual void check() override {
-		struct mlx5dv_mkey_err err;
-		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
-		ASSERT_EQ(MLX5DV_MKEY_NO_ERR, err.err_type);
-	}
-
 	virtual void check(int err_type) override {
 		struct mlx5dv_mkey_err err;
 		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
-		ASSERT_EQ(err_type, err.err_type);
+		ASSERT_EQ(mkey_sig_err(err_type), mkey_sig_err(&err));
 	}
 
-	virtual void check(int err_type, uint64_t actual, uint64_t expected,
+	virtual void check() override {
+		check(MLX5DV_MKEY_NO_ERR);
+	}
+
+	virtual void check(int err_type, uint64_t actual_value, uint64_t expected_value,
 			   uint64_t offset) override {
 		struct mlx5dv_mkey_err err;
-		struct mlx5dv_sig_err &sig_err = err.err.sig;
 		DO(mlx5dv_mkey_check(mlx5_mkey, &err));
-		ASSERT_EQ(err_type, err.err_type);
-		ASSERT_EQ(actual, sig_err.actual_value);
-		ASSERT_EQ(expected, sig_err.expected_value);
-		ASSERT_EQ(offset, sig_err.offset);
+		mkey_sig_err expected(err_type, actual_value, expected_value, offset);
+		mkey_sig_err actual(&err);
+		ASSERT_EQ(expected, actual);
 	}
 #else
 	virtual void check() override {
