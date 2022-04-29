@@ -113,6 +113,11 @@ struct _mkey_test_basic : public mkey_test_base<Qp> {
 		EXEC(dst_mkey.check());
 	}
 
+	void inc_mkeys() {
+		EXEC(src_mkey.inc());
+		EXEC(dst_mkey.inc());
+	}
+
 	void execute_rdma() {
 		auto &src_side = this->src_side;
 		auto &dst_side = this->dst_side;
@@ -180,7 +185,18 @@ TYPED_TEST_P(mkey_test_basic, non_signaled) {
 	EXEC(check_data());
 }
 
-REGISTER_TYPED_TEST_CASE_P(mkey_test_basic, basic, non_signaled);
+TYPED_TEST_P(mkey_test_basic, increment_mkey) {
+	CHK_SUT(dv_sig);
+
+	EXEC(fill_data());
+	EXEC(inc_mkeys());
+	EXEC(configure_mkeys());
+	EXEC(execute_rdma());
+	EXEC(check_mkeys());
+	EXEC(check_data());
+}
+
+REGISTER_TYPED_TEST_CASE_P(mkey_test_basic, basic, non_signaled, increment_mkey);
 
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
 template<typename ...Setters>

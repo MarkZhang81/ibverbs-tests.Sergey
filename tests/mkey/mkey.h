@@ -256,6 +256,7 @@ struct mkey : public ibvt_abstract_mr {
 	virtual void check(int err_type) = 0;
 	virtual void check(int err_type, uint64_t actual, uint64_t expected,
 			   uint64_t offset) = 0;
+	virtual void inc() = 0;
 };
 
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
@@ -423,6 +424,15 @@ struct mkey_dv : public mkey {
 			   uint64_t offset) override {
 	}
 #endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
+
+	virtual void inc() override {
+		uint32_t rkey;
+
+		rkey = mlx5_mkey->rkey;
+		rkey = ((rkey + 1) & 0xff) | (rkey & 0xffffff00);
+		mlx5_mkey->rkey = rkey;
+		mlx5_mkey->lkey = rkey;
+	}
 };
 
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
