@@ -426,12 +426,8 @@ struct mkey_dv : public mkey {
 #endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 
 	virtual void inc() override {
-		uint32_t rkey;
-
-		rkey = mlx5_mkey->rkey;
-		rkey = ((rkey + 1) & 0xff) | (rkey & 0xffffff00);
-		mlx5_mkey->rkey = rkey;
-		mlx5_mkey->lkey = rkey;
+		mlx5_mkey->rkey = ibv_inc_rkey(mlx5_mkey->rkey);
+		mlx5_mkey->lkey = mlx5_mkey->rkey;
 	}
 };
 
