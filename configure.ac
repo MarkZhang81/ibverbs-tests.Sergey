@@ -215,5 +215,9 @@ AC_CHECK_DECLS([mlx5dv_wr_mkey_configure], [], [], [[
 #include <infiniband/mlx5dv.h>
 ]])
 
+AC_CHECK_DECLS([MLX5DV_MKEY_INIT_ATTR_FLAGS_UPDATE_TAG], [], [], [[
+#include <infiniband/mlx5dv.h>
+]])
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT

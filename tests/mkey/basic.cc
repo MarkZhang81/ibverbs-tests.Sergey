@@ -113,11 +113,6 @@ struct _mkey_test_basic : public mkey_test_base<Qp> {
 		EXEC(dst_mkey.check());
 	}
 
-	void inc_mkeys() {
-		EXEC(src_mkey.inc());
-		EXEC(dst_mkey.inc());
-	}
-
 	void execute_rdma() {
 		auto &src_side = this->src_side;
 		auto &dst_side = this->dst_side;
@@ -185,18 +180,7 @@ TYPED_TEST_P(mkey_test_basic, non_signaled) {
 	EXEC(check_data());
 }
 
-TYPED_TEST_P(mkey_test_basic, increment_mkey) {
-	CHK_SUT(dv_sig);
-
-	EXEC(fill_data());
-	EXEC(inc_mkeys());
-	EXEC(configure_mkeys());
-	EXEC(execute_rdma());
-	EXEC(check_mkeys());
-	EXEC(check_data());
-}
-
-REGISTER_TYPED_TEST_CASE_P(mkey_test_basic, basic, non_signaled, increment_mkey);
+REGISTER_TYPED_TEST_CASE_P(mkey_test_basic, basic, non_signaled);
 
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
 template<typename ...Setters>
@@ -300,6 +284,55 @@ TEST_F(mkey_test_dv_custom, new_basicAttr_interleavedLayoutEntriesOverflow) {
 	EXECL(src_mkey.wr_configure(this->src_side.qp));
 	EXEC(src_side.qp.wr_complete(ENOMEM));
 }
+#if HAVE_DECL_MLX5DV_MKEY_INIT_ATTR_FLAGS_UPDATE_TAG
+TEST_F(mkey_test_dv_custom, increment_mkey) {
+	mkey_dv_new<mkey_access_flags<>,
+		    mkey_layout_new_list_mrs<DATA_SIZE>> src_mkey(*this,
+								  this->src_side.pd, 1,
+								  MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT |
+								  MLX5DV_MKEY_INIT_ATTR_FLAGS_UPDATE_TAG);
+	mkey_dv_new<mkey_access_flags<>,
+		    mkey_layout_new_list_mrs<DATA_SIZE>> dst_mkey(*this,
+								  this->dst_side.pd, 1,
+								  MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT |
+								  MLX5DV_MKEY_INIT_ATTR_FLAGS_UPDATE_TAG);
+	rdma_op_read rdma_op;
+
+	INITL(src_mkey.init());
+	INITL(dst_mkey.init());
+
+	CHK_SUT();
+
+	/* First iteration */
+	this->dst_side.qp.wr_flags(IBV_SEND_SIGNALED | IBV_SEND_INLINE);
+	EXECL(dst_mkey.configure(this->dst_side.qp));
+	EXEC(dst_side.cq.poll());
+
+	this->src_side.qp.wr_flags(IBV_SEND_SIGNALED | IBV_SEND_INLINE);
+	EXECL(src_mkey.configure(this->src_side.qp));
+	EXEC(src_side.cq.poll());
+
+	EXECL(rdma_op.submit(this->src_side, src_mkey.sge(), this->dst_side, dst_mkey.sge()));
+	EXECL(rdma_op.complete(this->src_side, this->dst_side));
+
+	/* Increment mkeys */
+	EXECL(src_mkey.inc());
+	EXECL(dst_mkey.inc());
+
+	/* Second iteration */
+	this->dst_side.qp.wr_flags(IBV_SEND_SIGNALED | IBV_SEND_INLINE);
+	EXECL(dst_mkey.configure(this->dst_side.qp));
+	EXEC(dst_side.cq.poll());
+
+	this->src_side.qp.wr_flags(IBV_SEND_SIGNALED | IBV_SEND_INLINE);
+	EXECL(src_mkey.configure(this->src_side.qp));
+	EXEC(src_side.cq.poll());
+
+	EXECL(rdma_op.submit(this->src_side, src_mkey.sge(), this->dst_side, dst_mkey.sge()));
+	EXECL(rdma_op.complete(this->src_side, this->dst_side));
+}
+
+#endif /* HAVE_DECL_MLX5DV_MKEY_INIT_ATTR_FLAGS_UPDATE_TAG */
 #endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 
 TEST_F(mkey_test_dv_custom, old_basicAttr_badAccessFlags) {
