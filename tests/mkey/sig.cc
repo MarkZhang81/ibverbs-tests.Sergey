@@ -463,7 +463,8 @@ struct sig_stress_test_types {
 	typedef T_RdmaOp RdmaOp;
 };
 typedef testing::Types<
-	sig_stress_test_types<1, ibvt_qp_dv<16,16,16,16>, rdma_op_write>
+	sig_stress_test_types<1, ibvt_qp_dv<16,16,16,16>, rdma_op_write>,
+	sig_stress_test_types<32, ibvt_qp_dv<4,2,4,2>, rdma_op_write>
 	> mkey_test_stress_test_ops;
 INSTANTIATE_TYPED_TEST_CASE_P(stress_test_ops, mkey_test_sig_block_stress_test, mkey_test_stress_test_ops);
 
