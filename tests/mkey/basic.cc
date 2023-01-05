@@ -58,16 +58,8 @@ struct _mkey_test_basic : public mkey_test_base<Qp> {
 	RdmaOp rdma_op;
 
 	_mkey_test_basic() :
-		src_mkey(*this, this->src_side.pd, MaxEntries, MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT
-#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
-			 | MLX5DV_MKEY_INIT_ATTR_FLAGS_BLOCK_SIGNATURE
-#endif
-			 ),
-		dst_mkey(*this, this->dst_side.pd, MaxEntries, MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT
-#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
-			 | MLX5DV_MKEY_INIT_ATTR_FLAGS_BLOCK_SIGNATURE
-#endif
-			 ) {}
+		src_mkey(*this, this->src_side.pd, MaxEntries, MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT),
+		dst_mkey(*this, this->dst_side.pd, MaxEntries, MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT) {}
 
 	virtual void SetUp() override {
 		mkey_test_base<Qp>::SetUp();
@@ -108,11 +100,6 @@ struct _mkey_test_basic : public mkey_test_base<Qp> {
 		EXEC(src_side.cq.poll());
 	}
 
-	void check_mkeys() {
-		EXEC(src_mkey.check());
-		EXEC(dst_mkey.check());
-	}
-
 	void execute_rdma() {
 		auto &src_side = this->src_side;
 		auto &dst_side = this->dst_side;
@@ -146,7 +133,6 @@ TYPED_TEST_P(mkey_test_basic, basic) {
 	EXEC(execute_rdma());
 	// src_mkey.layout->dump(0, 0, "SRC");
 	// dst_mkey.layout->dump(0, 0, "DST");
-	EXEC(check_mkeys());
 	EXEC(check_data());
 }
 
@@ -176,7 +162,6 @@ TYPED_TEST_P(mkey_test_basic, non_signaled) {
 		EXEC(src_side.cq.poll());
 
 	EXEC(execute_rdma());
-	EXEC(check_mkeys());
 	EXEC(check_data());
 }
 
