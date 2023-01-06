@@ -379,3 +379,71 @@ TEST_F(mkey_test_dv_custom, old_basicAttr_interleavedLayoutEntriesOverflow) {
 	EXECL(src_mkey.wr_configure(this->src_side.qp));
 	EXEC(src_side.qp.wr_complete(ENOMEM));
 }
+
+template<uint32_t MaxInlineData, uint64_t DvSendOpsFlags>
+using ibvt_qp_max_inline = ibvt_qp_dv<4,1,4,1,MaxInlineData,false, IBV_QP_EX_WITH_SEND, DvSendOpsFlags>;
+
+template<typename Mkey, uint16_t MaxEntries, uint64_t DvSendOpsFlags, uint32_t MaxInlineData, int MkeyConfResult>
+struct _mkey_test_max_inline_data : public mkey_test_base<ibvt_qp_max_inline<MaxInlineData, DvSendOpsFlags>> {
+	Mkey mkey;
+
+	_mkey_test_max_inline_data() :
+		mkey(*this, this->src_side.pd, MaxEntries, MLX5DV_MKEY_INIT_ATTR_FLAGS_INDIRECT) {}
+
+	virtual void SetUp() override {
+		mkey_test_base<ibvt_qp_max_inline<MaxInlineData, DvSendOpsFlags>>::SetUp();
+		INIT(mkey.init());
+	}
+
+	void configure_mkey() {
+		auto &src_side = this->src_side;
+		src_side.qp.wr_flags(IBV_SEND_SIGNALED | IBV_SEND_INLINE);
+		EXEC(src_side.qp.wr_start());
+		EXECL(mkey.wr_configure(src_side.qp));
+		EXEC(src_side.qp.wr_complete(MkeyConfResult));
+	}
+};
+
+template<typename T_Mkey, uint16_t T_MaxEntries, uint64_t T_DvSendOpsFlags, uint32_t T_MaxInlineData, int T_MkeyConfResult>
+struct max_inline_data_type {
+	typedef T_Mkey Mkey;
+	static constexpr uint16_t MaxEntries = T_MaxEntries;
+	static constexpr uint64_t DvSendOpsFlags = T_DvSendOpsFlags;
+	static constexpr uint32_t MaxInlineData = T_MaxInlineData;
+	static constexpr int MkeyConfResult = T_MkeyConfResult;
+};
+
+template<typename T>
+using mkey_test_max_inline_data = _mkey_test_max_inline_data<typename T::Mkey, T::MaxEntries, T::DvSendOpsFlags, T::MaxInlineData, T::MkeyConfResult>;
+
+TYPED_TEST_CASE_P(mkey_test_max_inline_data);
+
+TYPED_TEST_P(mkey_test_max_inline_data, basic) {
+	CHK_SUT(mkey_max_inline_data);
+
+	EXEC(configure_mkey());
+}
+
+REGISTER_TYPED_TEST_CASE_P(mkey_test_max_inline_data, basic);
+
+typedef testing::Types<
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+	/* New MKEY: list layout */
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_list_fixed_mrs<DATA_SIZE/4,4>>,4,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,0,0>,
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_list_fixed_mrs<DATA_SIZE/8,5>>,5,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,0,ENOMEM>,
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_list_fixed_mrs<DATA_SIZE/8,5>>,5,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,64,0>,
+	/* New MKEY: interleave layout*/
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_interleaved_mrs<2,512,8,512,8,512,8>>,3,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,0,0>,
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_interleaved_mrs<2,512,8,512,8,512,8,512,8>>,4,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,0,ENOMEM>,
+	max_inline_data_type<mkey_dv_new_basic<mkey_layout_new_interleaved_mrs<2,512,8,512,8,512,8,512,8>>,4,MLX5DV_QP_EX_WITH_MKEY_CONFIGURE,64,0>,
+#endif
+	/* Old MKEY: list layout */
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_list_mrs<DATA_SIZE/4, DATA_SIZE/4, DATA_SIZE/4, DATA_SIZE/4>>,4,MLX5DV_QP_EX_WITH_MR_LIST,0,0>,
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_list_mrs<DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8>>,5,MLX5DV_QP_EX_WITH_MR_LIST,0,ENOMEM>,
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_list_mrs<DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8, DATA_SIZE/8>>,5,MLX5DV_QP_EX_WITH_MR_LIST,64,0>,
+	/* Old MKEY: interleave layout */
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_interleaved_mrs<2,512,8,512,8,512,8>>,3,MLX5DV_QP_EX_WITH_MR_INTERLEAVED,0,0>,
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_interleaved_mrs<2,512,8,512,8,512,8,512,8>>,4,MLX5DV_QP_EX_WITH_MR_INTERLEAVED,0,ENOMEM>,
+	max_inline_data_type<mkey_dv_old<mkey_layout_old_interleaved_mrs<2,512,8,512,8,512,8,512,8>>,4,MLX5DV_QP_EX_WITH_MR_INTERLEAVED,64,0>
+	> max_inline_data_types;
+INSTANTIATE_TYPED_TEST_CASE_P(max_inline_data, mkey_test_max_inline_data, max_inline_data_types);

@@ -108,7 +108,17 @@ template <uint64_t Sig> struct crc64_sig {
 
 template<uint32_t MaxSendWr = 128, uint32_t MaxSendSge = 16,
 	 uint32_t MaxRecvWr = 32, uint32_t MaxRecvSge = 4,
-	 uint32_t MaxInlineData = 512, bool Pipelining = false>
+	 uint32_t MaxInlineData = 512, bool Pipelining = false,
+	 uint64_t SendOpsFlags = IBV_QP_EX_WITH_RDMA_WRITE |
+				 IBV_QP_EX_WITH_SEND |
+				 IBV_QP_EX_WITH_RDMA_READ |
+				 IBV_QP_EX_WITH_LOCAL_INV,
+	 uint64_t DvSendOpsFlags = MLX5DV_QP_EX_WITH_MR_INTERLEAVED |
+				   MLX5DV_QP_EX_WITH_MR_LIST
+#if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
+				   | MLX5DV_QP_EX_WITH_MKEY_CONFIGURE
+#endif
+				   >
 struct ibvt_qp_dv : public ibvt_qp_rc {
 	ibvt_qp_dv(ibvt_env &e, ibvt_pd &p, ibvt_cq &c) :
 		ibvt_qp_rc(e, p, c) {}
@@ -120,19 +130,18 @@ struct ibvt_qp_dv : public ibvt_qp_rc {
 		attr.cap.max_recv_wr = MaxRecvWr;
 		attr.cap.max_recv_sge = MaxRecvSge;
 		attr.cap.max_inline_data = MaxInlineData;
-		attr.comp_mask |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
-		attr.send_ops_flags = IBV_QP_EX_WITH_RDMA_WRITE |
-				      IBV_QP_EX_WITH_SEND |
-				      IBV_QP_EX_WITH_RDMA_READ |
-				      IBV_QP_EX_WITH_LOCAL_INV;
+		if (SendOpsFlags) {
+			attr.comp_mask |= IBV_QP_INIT_ATTR_SEND_OPS_FLAGS;
+			attr.send_ops_flags = SendOpsFlags;
+		}
 	}
 
 	virtual void init_dv_attr(struct mlx5dv_qp_init_attr &dv_attr) {
-		dv_attr.comp_mask = MLX5DV_QP_INIT_ATTR_MASK_SEND_OPS_FLAGS;
-		dv_attr.send_ops_flags = MLX5DV_QP_EX_WITH_MR_INTERLEAVED |
-					 MLX5DV_QP_EX_WITH_MR_LIST;
+		if (DvSendOpsFlags) {
+			dv_attr.comp_mask = MLX5DV_QP_INIT_ATTR_MASK_SEND_OPS_FLAGS;
+			dv_attr.send_ops_flags = DvSendOpsFlags;
+		}
 #if HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE
-		dv_attr.send_ops_flags |= MLX5DV_QP_EX_WITH_MKEY_CONFIGURE;
 		if (Pipelining) {
 			dv_attr.comp_mask |=
 			    MLX5DV_QP_INIT_ATTR_MASK_QP_CREATE_FLAGS;
