@@ -50,10 +50,54 @@
 
 #define DATA_SIZE 4096
 
+struct data_filler_a5 {
+	static void fill(void *data, size_t size) {
+		memset(data, 0xA5, size);
+	}
+};
+typedef data_filler_a5 data_filler_default;
+
+struct data_filler_all_zeros {
+	static void fill(void *data, size_t size) {
+		memset(data, 0, size);
+	}
+};
+
+struct data_filler_all_ones {
+	static void fill(void *data, size_t size) {
+		memset(data, 0xFF, size);
+	}
+};
+
+struct data_filler_00_to_ff {
+	static void fill(void *data, size_t size) {
+		uint8_t *buf = (uint8_t *)data;
+		uint8_t c = 0;
+		size_t i;
+
+		for (i = 0; i < size; i++) {
+			buf[i] = c++;
+		}
+	}
+};
+
+struct data_filler_ff_to_00 {
+	static void fill(void *data, size_t size) {
+		uint8_t *buf = (uint8_t *)data;
+		uint8_t c = 0xFF;
+		size_t i;
+
+		for (i = 0; i < size; i++) {
+			buf[i] = c--;
+		}
+	}
+};
+
 template<typename SrcSigBlock, typename SrcValue,
 	 typename DstSigBlock, typename DstValue,
 	 uint32_t NumBlocks = 1, 
 	 typename RdmaOp = rdma_op_read,
+	 typename DataFiller = data_filler_default,
 	 typename Qp = ibvt_qp_dv<>>
 struct _mkey_test_sig_block : public mkey_test_base<Qp> {
 	static constexpr uint32_t src_block_size = SrcSigBlock::MemDomainType::BlockSizeType::block_size;
@@ -100,7 +144,7 @@ struct _mkey_test_sig_block : public mkey_test_base<Qp> {
 		uint8_t src_buf[src_total_size];
 		uint8_t *buf = src_buf;
 
-		memset(src_buf, 0xA5, src_total_size);
+		DataFiller::fill(src_buf, src_total_size);
 		for (uint32_t i = 0; i < NumBlocks; ++i) {
 			buf += src_block_size;
 			if (src_sig_size) {
@@ -136,7 +180,7 @@ struct _mkey_test_sig_block : public mkey_test_base<Qp> {
 
 		VERBS_TRACE("SrcBlockSize %u, SrcSigSize %u, DstBlockSize %u, DstSigSize %u\n",
 			    src_block_size, src_sig_size, dst_block_size, dst_sig_size);
-		memset(ref_block_buf, 0xA5, dst_block_size);
+		DataFiller::fill(ref_block_buf, dst_block_size);
 		dst_mkey.layout->get_data(dst_buf, dst_total_size);
 		for (uint32_t i = 0; i < NumBlocks; ++i) {
 			ASSERT_EQ(0, memcmp(buf, ref_block_buf, dst_block_size));
@@ -190,6 +234,7 @@ template<typename T_SrcSigBlock, typename T_SrcValue,
 	 typename T_DstSigBlock, typename T_DstValue,
 	 uint32_t T_NumBlocks = 1,
 	 typename T_RdmaOp = rdma_op_read,
+	 typename T_DataFiller = data_filler_default,
 	 typename T_Qp = ibvt_qp_dv<>>
 struct types {
 	typedef T_SrcSigBlock SrcSigBlock;
@@ -198,6 +243,7 @@ struct types {
 	typedef T_DstValue DstValue;
 	static constexpr uint64_t NumBlocks = T_NumBlocks;
 	typedef T_RdmaOp RdmaOp;
+	typedef T_DataFiller DataFiller;
 	typedef T_Qp Qp;
 };
 
@@ -206,6 +252,7 @@ using mkey_test_sig_block = _mkey_test_sig_block<typename T::SrcSigBlock, typena
 						 typename T::DstSigBlock, typename T::DstValue,
 						 T::NumBlocks,
 						 typename T::RdmaOp,
+						 typename T::DataFiller,
 						 typename T::Qp>;
 
 TYPED_TEST_CASE_P(mkey_test_sig_block);
@@ -432,7 +479,7 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
-	      1, rdma_op_write, ibvt_qp_dv<128,16,32,4,512>>,
+	      1, rdma_op_write, data_filler_default, ibvt_qp_dv<128,16,32,4,512>>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
@@ -452,7 +499,7 @@ using mkey_test_sig_block_stress_test = _mkey_test_sig_block<
 	mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 		     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 	t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	T::NumSgl, typename T::RdmaOp, typename T::Qp>;
+	T::NumSgl, typename T::RdmaOp, data_filler_default, typename T::Qp>;
 
 TYPED_TEST_CASE_P(mkey_test_sig_block_stress_test);
 
@@ -940,7 +987,7 @@ typedef _mkey_test_sig_block<
     mkey_sig_block<mkey_sig_block_domain_none,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    sig_none, 1, rdma_op_write,
+    sig_none, 1, rdma_op_write, data_filler_default,
     ibvt_qp_dv<128,16,32,4,512,true>> mkey_test_sig_pipelining;
 
 TEST_F(mkey_test_sig_pipelining, pipeliningBasicFlow) {
