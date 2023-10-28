@@ -53,8 +53,8 @@
 template<typename SrcSigBlock, typename SrcValue,
 	 typename DstSigBlock, typename DstValue,
 	 uint32_t NumBlocks = 1, 
-	 typename Qp = ibvt_qp_dv<>, 
-	 typename RdmaOp = rdma_op_read>
+	 typename RdmaOp = rdma_op_read,
+	 typename Qp = ibvt_qp_dv<>>
 struct _mkey_test_sig_block : public mkey_test_base<Qp> {
 	static constexpr uint32_t src_block_size = SrcSigBlock::MemDomainType::BlockSizeType::block_size;
 	static constexpr uint32_t src_sig_size = SrcSigBlock::MemDomainType::SigType::sig_size;
@@ -189,24 +189,24 @@ struct _mkey_test_sig_block : public mkey_test_base<Qp> {
 template<typename T_SrcSigBlock, typename T_SrcValue,
 	 typename T_DstSigBlock, typename T_DstValue,
 	 uint32_t T_NumBlocks = 1,
-	 typename T_Qp = ibvt_qp_dv<>, 
-	 typename T_RdmaOp = rdma_op_read>
+	 typename T_RdmaOp = rdma_op_read,
+	 typename T_Qp = ibvt_qp_dv<>>
 struct types {
 	typedef T_SrcSigBlock SrcSigBlock;
 	typedef T_SrcValue SrcValue;
 	typedef T_DstSigBlock DstSigBlock;
 	typedef T_DstValue DstValue;
 	static constexpr uint64_t NumBlocks = T_NumBlocks;
-	typedef T_Qp Qp;
 	typedef T_RdmaOp RdmaOp;
+	typedef T_Qp Qp;
 };
 
 template<typename T>
 using mkey_test_sig_block = _mkey_test_sig_block<typename T::SrcSigBlock, typename T::SrcValue,
 						 typename T::DstSigBlock, typename T::DstValue,
 						 T::NumBlocks,
-						 typename T::Qp,
-						 typename T::RdmaOp>;
+						 typename T::RdmaOp,
+						 typename T::Qp>;
 
 TYPED_TEST_CASE_P(mkey_test_sig_block);
 
@@ -351,14 +351,14 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
-	      1, ibvt_qp_dv<>, rdma_op_read>,
+	      1, rdma_op_read>,
 	types<mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
-	      1, ibvt_qp_dv<>, rdma_op_write>,
+	      1, rdma_op_write>,
 
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
@@ -366,14 +366,14 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	      1, ibvt_qp_dv<>, rdma_op_read>,
+	      1, rdma_op_read>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	      1, ibvt_qp_dv<>, rdma_op_write>,
+	      1, rdma_op_write>,
 
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
@@ -381,14 +381,14 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	      2, ibvt_qp_dv<>, rdma_op_read>,
+	      2, rdma_op_read>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	      2, ibvt_qp_dv<>, rdma_op_write>,
+	      2, rdma_op_write>,
 
 	types<mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
@@ -396,21 +396,21 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
-	      1, ibvt_qp_dv<>, rdma_op_read>,
+	      1, rdma_op_read>,
 	types<mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
-	      1, ibvt_qp_dv<>, rdma_op_write>,
+	      1, rdma_op_write>,
 	types<mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_t10dif_csum_type1_default, mkey_block_size_512>>,
 			     t10dif_sig<0,0,0>,
-	      1, ibvt_qp_dv<>, rdma_op_send>,
+	      1, rdma_op_send>,
 
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
@@ -418,28 +418,28 @@ typedef testing::Types<
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
-	      1, ibvt_qp_dv<>, rdma_op_read>,
+	      1, rdma_op_read>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
-	      1, ibvt_qp_dv<>, rdma_op_write>,
+	      1, rdma_op_write>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
-	      1, ibvt_qp_dv<128,16,32,4,512>, rdma_op_write>,
+	      1, rdma_op_write, ibvt_qp_dv<128,16,32,4,512>>,
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
 	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 			     crc32_sig<0x699ACA21>,
-	      1, ibvt_qp_dv<>, rdma_op_send>
+	      1, rdma_op_send>
 
 	> mkey_test_list_ops;
 INSTANTIATE_TYPED_TEST_CASE_P(ops, mkey_test_sig_block, mkey_test_list_ops);
@@ -452,7 +452,7 @@ using mkey_test_sig_block_stress_test = _mkey_test_sig_block<
 	mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>,
 		     mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default, mkey_block_size_512>>,
 	t10dif_sig<0xec7d,0x5678,0xf0debc9a>,
-	T::NumSgl, typename T::Qp, typename T::RdmaOp>;
+	T::NumSgl, typename T::RdmaOp, typename T::Qp>;
 
 TYPED_TEST_CASE_P(mkey_test_sig_block_stress_test);
 
@@ -467,15 +467,15 @@ TYPED_TEST_P(mkey_test_sig_block_stress_test, basic) {
 }
 
 REGISTER_TYPED_TEST_CASE_P(mkey_test_sig_block_stress_test, basic);
-template<uint32_t T_NumSgl, typename T_Qp, typename T_RdmaOp = rdma_op_read>
+template<uint32_t T_NumSgl, typename T_Qp, typename T_RdmaOp = rdma_op_write>
 struct sig_stress_test_types {
 	static constexpr uint32_t NumSgl = T_NumSgl;
 	typedef T_Qp Qp;
 	typedef T_RdmaOp RdmaOp;
 };
 typedef testing::Types<
-	sig_stress_test_types<1, ibvt_qp_dv<16,16,16,16>, rdma_op_write>,
-	sig_stress_test_types<32, ibvt_qp_dv<4,2,4,2>, rdma_op_write>
+	sig_stress_test_types<1, ibvt_qp_dv<16,16,16,16>>,
+	sig_stress_test_types<32, ibvt_qp_dv<4,2,4,2>>
 	> mkey_test_stress_test_ops;
 INSTANTIATE_TYPED_TEST_CASE_P(stress_test_ops, mkey_test_sig_block_stress_test, mkey_test_stress_test_ops);
 
@@ -489,7 +489,6 @@ using mkey_test_sig_block_fence = _mkey_test_sig_block<
 		       mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>,
 	crc32_sig<0x699ACA21>,
 	1,
-	ibvt_qp_dv<>,
 	typename T::RdmaOp>;
 
 TYPED_TEST_CASE_P(mkey_test_sig_block_fence);
@@ -622,7 +621,7 @@ typedef _mkey_test_sig_block<
 					 mkey_block_size_512>,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 2, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 2,
     rdma_op_write> mkey_test_t10dif_type1;
 
 TEST_F(mkey_test_t10dif_type1, skipCheckRefTag) {
@@ -650,7 +649,7 @@ typedef _mkey_test_sig_block<
 					 mkey_block_size_512>,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 2, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 2,
     rdma_op_write> mkey_test_t10dif_type3;
 
 TEST_F(mkey_test_t10dif_type3, skipCheckRefTag) {
@@ -679,7 +678,7 @@ typedef _mkey_test_sig_block<
 						    0x1234, 0xf0debc9a>,
 					 mkey_block_size_512> >,
     //APP Tag 0x5678 is regenerated
-    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1,
     rdma_op_write> mkey_test_different_app_tag_byte0_rdma_write;
 
 TEST_F(mkey_test_different_app_tag_byte0_rdma_write, corruptByte1) {
@@ -757,7 +756,7 @@ typedef _mkey_test_sig_block<
 					 mkey_block_size_512>,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    t10dif_sig<0xec7d,0xA978,0xf0debc9a>, 1, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0xA978,0xf0debc9a>, 1,
     rdma_op_write> mkey_test_same_app_tag_byte0_rdma_read;
 
 TEST_F(mkey_test_same_app_tag_byte0_rdma_read, corruptByte1) {
@@ -825,7 +824,7 @@ typedef _mkey_test_sig_block<
 					 mkey_block_size_512>,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1,
     rdma_op_write> mkey_test_sig_corrupt;
 
 TEST_F(mkey_test_sig_corrupt, guardError) {
@@ -881,8 +880,9 @@ typedef _mkey_test_sig_block<
 					 mkey_block_size_512>,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1, ibvt_qp_dv<>,
+    t10dif_sig<0xec7d,0x5678,0xf0debc9a>, 1,
     rdma_op_write> mkey_test_sig_incorrect_ref_tag;
+
 TEST_F(mkey_test_sig_incorrect_ref_tag, refTagError) {
 	CHK_SUT();
 
@@ -902,7 +902,7 @@ typedef _mkey_test_sig_block<
     mkey_sig_block<
 	mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>,
 	mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512> >,
-    crc32_sig<0x699ACA21>, 1, ibvt_qp_dv<>,
+    crc32_sig<0x699ACA21>, 1,
     rdma_op_write> mkey_test_crc_sig_corrupt;
 
 TEST_F(mkey_test_crc_sig_corrupt, corruptData) {
@@ -940,8 +940,8 @@ typedef _mkey_test_sig_block<
     mkey_sig_block<mkey_sig_block_domain_none,
 		   mkey_sig_block_domain<mkey_sig_t10dif_crc_type1_default,
 					 mkey_block_size_512> >,
-    sig_none, 1, ibvt_qp_dv<128,16,32,4,512,true>,
-    rdma_op_write> mkey_test_sig_pipelining;
+    sig_none, 1, rdma_op_write,
+    ibvt_qp_dv<128,16,32,4,512,true>> mkey_test_sig_pipelining;
 
 TEST_F(mkey_test_sig_pipelining, pipeliningBasicFlow) {
 	const size_t SEND_SIZE = 64;
