@@ -104,6 +104,137 @@ template <uint64_t Sig> struct crc64_sig {
 		*(uint64_t *)buf = htobe64(sig);
 	}
 };
+
+#if HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF
+
+#define _MASK(N_BITS) (((N_BITS) == 64) ? UINT64_MAX : (((1ULL << (N_BITS)) - 1)))
+template <uint64_t Guard,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  int Format,
+	  uint8_t StorageTagSize,
+	  int Flags = 0>
+struct nvmedif_sig {
+	static const uint64_t guard = Guard;
+	static const uint64_t storage_tag = StorageTag;
+	static const uint64_t _ref_tag = RefTag;
+	static const uint16_t app_tag = AppTag;
+	static const int format = Format;
+	static const uint8_t sts = StorageTagSize;
+	static const int flags = Flags;
+
+	static void sig_to_buf(uint8_t *buf, uint32_t block_index) {
+		int i = 0;
+		uint64_t sts_mask;
+		uint64_t ref_tag;
+		uint64_t ref_tag_mask;
+		uint8_t ref_tag_size;
+
+		if (flags & MLX5DV_SIG_NVMEDIF_FLAG_REF_REMAP) {
+			ref_tag = _ref_tag + block_index;
+		} else {
+			ref_tag = _ref_tag;
+		}
+
+		static_assert((format == MLX5DV_SIG_NVMEDIF_FORMAT_16 && sts <= 32) ||
+			      (format == MLX5DV_SIG_NVMEDIF_FORMAT_32 && sts >= 16 && sts <= 64) ||
+			      (format == MLX5DV_SIG_NVMEDIF_FORMAT_64 && sts <= 48));
+
+		if (format == MLX5DV_SIG_NVMEDIF_FORMAT_16) {
+			*(uint16_t *)buf = htons(guard);
+			i += 2;
+			ref_tag_size = 32 - sts;
+		} else if (format == MLX5DV_SIG_NVMEDIF_FORMAT_32) {
+			*(uint32_t *)buf = htonl(guard);
+			i += 4;
+			ref_tag_size = 80 - sts;
+		} else { // format == MLX5DV_SIG_NVMEDIF_FORMAT_64
+			*(uint64_t *)buf = htobe64(guard);
+			i += 8;
+			ref_tag_size = 48 - sts;
+		}
+		ref_tag_mask = _MASK(ref_tag_size);
+
+		*(uint16_t *)&buf[i] = htons(app_tag);
+		i += 2;
+
+		if (format == MLX5DV_SIG_NVMEDIF_FORMAT_16) {
+			if (sts == 0) {
+				*(uint32_t *)&buf[i] = htonl(ref_tag & ref_tag_mask);
+			} else {
+				sts_mask = _MASK(sts);
+				*(uint32_t *)&buf[i] = htonl(((storage_tag & sts_mask) << ref_tag_size) |
+							     (ref_tag & ref_tag_mask));
+			}
+		} else if (format == MLX5DV_SIG_NVMEDIF_FORMAT_32) {
+
+			buf[i++] = (storage_tag >> (sts - 8 )) & 0xff;
+			buf[i++] = (storage_tag >> (sts - 16)) & 0xff;
+
+			if (sts == 16) {
+				*(uint64_t *)&buf[i] = htobe64(ref_tag & ref_tag_mask);
+			} else {
+				sts_mask = _MASK(sts - 16);
+                                *(uint64_t *)&buf[i] = htobe64(((storage_tag & sts_mask) << ref_tag_size) |
+							       (ref_tag & ref_tag_mask));
+                        }
+                } else { // format == MLX5DV_SIG_NVMEDIF_FORMAT_64
+			uint64_t storage_and_ref_space;
+
+			if (sts == 0) {
+				storage_and_ref_space = ref_tag & ref_tag_mask;
+			} else {
+				sts_mask = _MASK(sts);
+				storage_and_ref_space = ((storage_tag & sts_mask) << ref_tag_size) |
+							(ref_tag & ref_tag_mask);
+			}
+
+			buf[i++] = (storage_and_ref_space >> 40) & 0xff;
+			buf[i++] = (storage_and_ref_space >> 32) & 0xff;
+			buf[i++] = (storage_and_ref_space >> 24) & 0xff;
+			buf[i++] = (storage_and_ref_space >> 16) & 0xff;
+			buf[i++] = (storage_and_ref_space >> 8 ) & 0xff;
+			buf[i++] = (storage_and_ref_space      ) & 0xff;
+		}
+	}
+};
+
+template <uint64_t Guard,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  int Flags = 0>
+struct nvmedif_16_sig : nvmedif_sig<Guard, StorageTag, RefTag, AppTag,
+				    MLX5DV_SIG_NVMEDIF_FORMAT_16,
+				    StorageTagSize, Flags> {
+};
+
+template <uint64_t Guard,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  int Flags = 0>
+struct nvmedif_32_sig : nvmedif_sig<Guard, StorageTag, RefTag, AppTag,
+				    MLX5DV_SIG_NVMEDIF_FORMAT_32,
+				    StorageTagSize, Flags> {
+};
+
+template <uint64_t Guard,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  int Flags = 0>
+struct nvmedif_64_sig : nvmedif_sig<Guard, StorageTag, RefTag, AppTag,
+				    MLX5DV_SIG_NVMEDIF_FORMAT_64,
+				    StorageTagSize, Flags> {
+};
+
+#undef _MASK
+#endif /* HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF */
 #endif /* HAVE_DECL_MLX5DV_WR_MKEY_CONFIGURE */
 
 template<uint32_t MaxSendWr = 128, uint32_t MaxSendSge = 16,
@@ -313,6 +444,10 @@ struct mkey_sig_err {
 			return "MLX5DV_MKEY_SIG_BLOCK_BAD_REFTAG";
 		case MLX5DV_MKEY_SIG_BLOCK_BAD_APPTAG:
 			return "MLX5DV_MKEY_SIG_BLOCK_BAD_APPTAG";
+#if HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF
+		case MLX5DV_MKEY_SIG_BLOCK_BAD_STORAGETAG:
+			return "MLX5DV_MKEY_SIG_BLOCK_BAD_STORAGETAG";
+#endif
 		}
 		return "UNKNOWN_ERROR";
 	}
@@ -820,6 +955,77 @@ struct mkey_sig_crc64 {
 	}
 };
 
+#if HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF
+
+template <uint64_t Seed,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  mlx5dv_sig_nvmedif_format Format,
+	  uint8_t StorageTagSize,
+	  uint16_t Flags = 0,
+	  uint8_t AppTagCheck = 0xf,
+	  uint8_t StorageTagCheck = 0x3f>
+struct mkey_sig_nvmedif {
+	static constexpr uint32_t sig_size = (Format == MLX5DV_SIG_NVMEDIF_FORMAT_16) ? 8 : 16;
+	struct mlx5dv_sig_nvmedif nvmedif;
+
+	void set_sig(struct mlx5dv_sig_block_domain &domain) {
+		nvmedif.format = Format;
+		nvmedif.flags = Flags;
+		nvmedif.seed = Seed;
+		nvmedif.storage_tag = StorageTag;
+		nvmedif.ref_tag = RefTag;
+		nvmedif.app_tag = AppTag;
+		nvmedif.sts = StorageTagSize;
+		nvmedif.app_tag_check = AppTagCheck;
+		nvmedif.storage_tag_check = StorageTagCheck;
+
+		domain.sig_type = MLX5DV_SIG_TYPE_NVMEDIF;
+		domain.sig.nvmedif = &nvmedif;
+		domain.comp_mask = 0;
+	}
+
+	static bool is_supported(struct mlx5dv_context &attr) {
+		return attr.sig_caps.block_prot & MLX5DV_SIG_PROT_CAP_NVMEDIF;
+	}
+};
+
+template <uint64_t Seed,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  uint16_t Flags = 0,
+	  uint8_t AppTagCheck = 0xf,
+	  uint8_t StorageTagCheck = 0x3f>
+struct mkey_sig_nvmedif_16 : mkey_sig_nvmedif<Seed, StorageTag, RefTag, AppTag, MLX5DV_SIG_NVMEDIF_FORMAT_16,
+					      StorageTagSize, Flags, AppTagCheck, StorageTagCheck> {};
+
+template <uint64_t Seed,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  uint16_t Flags = 0,
+	  uint8_t AppTagCheck = 0xf,
+	  uint8_t StorageTagCheck = 0x3f>
+struct mkey_sig_nvmedif_32 : mkey_sig_nvmedif<Seed, StorageTag, RefTag, AppTag, MLX5DV_SIG_NVMEDIF_FORMAT_32,
+					      StorageTagSize, Flags, AppTagCheck, StorageTagCheck> {};
+
+template <uint64_t Seed,
+	  uint64_t StorageTag,
+	  uint64_t RefTag,
+	  uint16_t AppTag,
+	  uint8_t StorageTagSize,
+	  uint16_t Flags = 0,
+	  uint8_t AppTagCheck = 0xf,
+	  uint8_t StorageTagCheck = 0x3f>
+struct mkey_sig_nvmedif_64 : mkey_sig_nvmedif<Seed, StorageTag, RefTag, AppTag, MLX5DV_SIG_NVMEDIF_FORMAT_64,
+					      StorageTagSize, Flags, AppTagCheck, StorageTagCheck> {};
+
+#endif /* HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF */
+
 template<enum mlx5dv_block_size Mlx5BlockSize,
 	 enum mlx5dv_block_size_caps Mlx5BlockSizeCaps,
 	 uint32_t BlockSize>
@@ -922,6 +1128,16 @@ typedef mkey_sig_t10dif_type3<mkey_sig_t10dif_crc, 0xffff, 0x5678, 0xf0debc9a> m
 
 typedef mkey_sig_t10dif_type1<mkey_sig_t10dif_csum, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_csum_type1_default;
 typedef mkey_sig_t10dif_type3<mkey_sig_t10dif_csum, 0xffff, 0x5678, 0xf0debc9a> mkey_sig_t10dif_csum_type3_default;
+
+#if HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF
+typedef mkey_sig_nvmedif_16<UINT16_MAX, 0, 0x89abcdef, 0x4567, 0> mkey_sig_nvmedif_16_sts_0_default;
+typedef mkey_sig_nvmedif_16<UINT16_MAX, 0x89ab, 0xcdef, 0x4567, 16> mkey_sig_nvmedif_16_sts_16_default;
+typedef mkey_sig_nvmedif_16<UINT16_MAX, 0x89abcdef, 0, 0x4567, 32> mkey_sig_nvmedif_16_sts_32_default;
+
+typedef mkey_sig_nvmedif_32<0, 0xcdef, 0x0123456789abcdef, 0x89ab, 16> mkey_sig_nvmedif_32_sts_16_default;
+
+typedef mkey_sig_nvmedif_64<0, 0x4567, 0x89abcdef, 0x0123, 16> mkey_sig_nvmedif_64_sts_16_default;
+#endif /* HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF */
 
 typedef mkey_sig_block<mkey_sig_block_domain_none, mkey_sig_block_domain_none> mkey_sig_block_none;
 

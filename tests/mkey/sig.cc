@@ -279,6 +279,17 @@ typedef testing::Types<
 			     mkey_sig_block_domain<mkey_sig_t10dif_crc_type3_default, mkey_block_size_512>>,
 			     t10dif_sig<0xec7d,0x5678,0xf0debc9a, false>, 2>,
 
+#if HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF
+	types<mkey_sig_block<mkey_sig_block_domain_none,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_0_default, mkey_block_size_4096>>, sig_none,
+	      mkey_sig_block<mkey_sig_block_domain_none,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_0_default, mkey_block_size_4096>>, sig_none>,
+	types<mkey_sig_block<mkey_sig_block_domain_none,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_32_default, mkey_block_size_4096>>, sig_none,
+	      mkey_sig_block<mkey_sig_block_domain_none,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_32_default, mkey_block_size_4096>>, sig_none>,
+#endif /* HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF */
+
 	// BG types of src mem and wire are same, but seeds are different, mem seed is 0x0000 and wire seed is 0xffff
 	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_t10dif_type1<mkey_sig_t10dif_crc, 0x0000, 0x5678, 0xf0debc9a>,
 						   mkey_block_size_512>,
