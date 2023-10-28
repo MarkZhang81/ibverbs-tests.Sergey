@@ -273,7 +273,7 @@ REGISTER_TYPED_TEST_CASE_P(mkey_test_sig_block, basic);
 
 typedef testing::Types<
 
-	// Wire domain
+	// < src_sig<mem, wire>, src_sig_value, dst_sig<mem, wire>, dst_sig_value, rdma_op, data_filler, qp>
 	types<mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_crc32ieee, mkey_block_size_512>>, sig_none,
 	      mkey_sig_block<mkey_sig_block_domain_none,
@@ -335,6 +335,90 @@ typedef testing::Types<
 			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_32_default, mkey_block_size_4096>>, sig_none,
 	      mkey_sig_block<mkey_sig_block_domain_none,
 			     mkey_sig_block_domain<mkey_sig_nvmedif_16_sts_32_default, mkey_block_size_4096>>, sig_none>,
+	/*
+	 * Here are tests cases from NVM Command Set Specification Revision 1.0b
+	 *
+	 * Figure 117: 32b CRC Test Cases for 4 KiB Logical Block with no Metadata
+	 *
+	 * +------------------------------------------------------------------------+-----------------------+
+	 * | Logical Block Contents                                                 | 32b Guard Field Value |
+	 * +------------------------------------------------------------------------+-----------------------+
+	 * | 4 KiB bytes each byte cleared to 00h                                   | 98F94189h             |
+	 * | 4 KiB bytes each byte set to FFh                                       | 25C1FE13h             |
+	 * | 4 KiB bytes of an incrementing byte pattern from 00h to FFh, repeating | 9C71FE32h             |
+	 * | 4 KiB bytes of a decrementing pattern from FFh to 00h, repeating       | 214941A8h             |
+	 * +------------------------------------------------------------------------+-----------------------+
+	 */
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x98F94189, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x98F94189, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      1, rdma_op_read, data_filler_all_zeros>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x25C1FE13, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x25C1FE13, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      1, rdma_op_read, data_filler_all_ones>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x9C71FE32, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x9C71FE32, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      1, rdma_op_read, data_filler_00_to_ff>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x214941A8, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_32_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_32_sig<0x214941A8, 0xcdef, 0x0123456789abcdef, 0x89ab, 16>,
+	      1, rdma_op_read, data_filler_ff_to_00>,
+	/*
+	 * Here are tests cases from NVM Command Set Specification Revision 1.0b
+	 *
+	 * Figure 121: 64b CRC Test Cases for 4 KiB Logical Block with no Metadata
+	 *
+	 * +------------------------------------------------------------------------+-----------------------+
+	 * | Logical Block Contents                                                 | 64b Guard Field Value |
+	 * +------------------------------------------------------------------------+-----------------------+
+	 * | 4 KiB bytes each byte cleared to 00h                                   | 6482D367_EB22B64Eh    |
+	 * | 4 KiB bytes each byte set to FFh                                       | C0DDBA73_02ECA3ACh    |
+	 * | 4 KiB bytes of an incrementing byte pattern from 00h to FFh, repeating | 3E729F5F_6750449Ch    |
+	 * | 4 KiB bytes of a decrementing pattern from FFh to 00h, repeating       | 9A2DF64B8_E9E517Eh    |
+	 * +------------------------------------------------------------------------+-----------------------+
+	 */
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x6482D367EB22B64E, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x6482D367EB22B64E, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      1, rdma_op_read, data_filler_all_zeros>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0xC0DDBA7302ECA3AC, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0xC0DDBA7302ECA3AC, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      1, rdma_op_read, data_filler_all_ones>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x3E729F5F6750449C, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x3E729F5F6750449C, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      1, rdma_op_read, data_filler_00_to_ff>,
+	types<mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x9A2DF64B8E9E517E, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      mkey_sig_block<mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>,
+			     mkey_sig_block_domain<mkey_sig_nvmedif_64_sts_16_default, mkey_block_size_4096>>,
+	      nvmedif_64_sig<0x9A2DF64B8E9E517E, 0x4567, 0x89abcdef, 0x0123, 16>,
+	      1, rdma_op_read, data_filler_ff_to_00>,
 #endif /* HAVE_DECL_MLX5DV_SIG_TYPE_NVMEDIF */
 
 	// BG types of src mem and wire are same, but seeds are different, mem seed is 0x0000 and wire seed is 0xffff
